@@ -12,11 +12,11 @@
 <script>
   // ============================================================
   // ▶ 설정 (여기 두 줄만 수정하세요)
-  //   scriptUrl : https://script.google.com/macros/s/AKfycbw3F-2iJ2k3eq7TgUk_6cyS6xG6tHGHkwmZWEbanfgucAmKL4scNQVpetcgNENsdtzXgw/exec
+  //   scriptUrl : Apps Script [배포]에서 받은 웹 앱 주소 (https://script.google.com/macros/s/…/exec)
   //   appKey    : Code.gs의 APP_KEY와 똑같은 글자
   // ============================================================
   window.TBM_CONFIG = {
-    scriptUrl: "여기에_웹앱_주소_붙여넣기",
+    scriptUrl: "https://script.google.com/macros/s/AKfycbw3F-2iJ2k3eq7TgUk_6cyS6xG6tHGHkwmZWEbanfgucAmKL4scNQVpetcgNENsdtzXgw/exec",
     appKey: "kd-tbm-2026"
   };
 </script>
@@ -183,7 +183,7 @@ details[open] summary::before { content: "− "; }
     <h1>TBM 일지 작성</h1>
     <p class="greet">작업 전 안전점검회의 · Tool Box Meeting</p>
     <span class="date-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span id="dateLabel">-</span></span>
-    <div class="preview-note" id="previewNote" hidden>미리보기 화면이라 메일은 발송되지 않아요. 메일 발송 주소를 설정한 화면에서는 담당자에게 자동 발송됩니다.</div>
+    <div class="preview-note" id="previewNote" hidden>메일 발송 주소가 설정되지 않아 메일이 발송되지 않아요. index.html의 scriptUrl에 Apps Script 웹 앱 주소(…/exec)를 넣어 주세요.</div>
   </div>
 </header>
 
@@ -300,7 +300,8 @@ details[open] summary::before { content: "− "; }
 
   var gas = (typeof google !== "undefined" && google.script && google.script.run) ? google.script.run : null;
   var TC = window.TBM_CONFIG || {};
-  var apiUrl = (!gas && /^https:\/\/script\.google\.com\/macros\/s\/[^\/]+\/exec/.test(TC.scriptUrl || "")) ? TC.scriptUrl.trim() : "";
+  var rawUrl = String(TC.scriptUrl || "").trim().replace(/^http:/, "https:").split("?")[0];
+  var apiUrl = (!gas && /^https:\/\/script\.google\.com\/(a\/macros\/[^\/]+|macros)\/s\/[^\/]+\/exec$/.test(rawUrl)) ? rawUrl : "";
   var canSend = !!(gas || apiUrl);
 
   // 서버(Apps Script) 호출: Apps Script 안에서 열면 google.script.run, GitHub Pages에서 열면 웹 앱 주소로 요청
