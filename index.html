@@ -506,54 +506,76 @@ details[open] summary::before { content: "− "; }
   function fmtClock(sec) { sec = Math.floor(sec); return pad(Math.floor(sec / 60)) + ":" + pad(sec % 60); }
   function elapsed() { return recElapsed + (wantRec ? (Date.now() - recStartedAt) / 1000 : 0); }
 
+  var isStandalone = (function () {
+    try { return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true; } catch (e) { return false; }
+  })();
+  var quickFails = 0, sessionAt = 0, sessionGotResult = false;
+
   function startSession() {
-    var r = new SR();
-    r.lang = "ko-KR";
-    r.continuous = true;
-    r.interimResults = true;
-    r.maxAlternatives = 1;
-    r.onresult = function (e) {
-      // 전체 결과를 매번 다시 모아서 중복 누적을 막음
-      var fin = [], interim = "";
-      for (var i = 0; i < e.results.length; i++) {
-        var t = (e.results[i][0] && e.results[i][0].transcript || "").trim();
-        if (!t) continue;
-        if (e.results[i].isFinal) fin.push(t); else interim += (interim ? " " : "") + t;
-      }
-      sessionText = joinText(fin.join("\n"), interim);
-      syncContent();
-      renderRecMeta();
-    };
-    r.onerror = function (e) {
-      if (e.error === "not-allowed" || e.error === "service-not-allowed" || e.error === "audio-capture") {
-        wantRec = false;
-        switchToManual(e.error === "audio-capture"
-          ? "마이크를 찾을 수 없어요. 진행한 내용을 직접 적어 주세요."
-          : "마이크 사용이 허용되지 않았어요. 휴대폰 설정에서 브라우저의 마이크 권한을 허용하거나, 진행한 내용을 직접 적어 주세요.");
-      }
-      // no-speech, network, aborted 는 onend 에서 자동으로 다시 시작
-    };
-    r.onend = function () {
-      committed = joinText(committed, sessionText);
-      sessionText = "";
-      syncContent();
-      if (rec === r) rec = null;
-      if (wantRec) {
-        setTimeout(function () { if (wantRec && !rec) { try { rec = startSession(); } catch (err) {} } }, 250);
-      } else {
-        var w = stopWaiters; stopWaiters = [];
-        w.forEach(function (fn) { fn(); });
-      }
-    };
+    // 인식기는 한 번만 만들고 끊기면 같은 인식기를 다시 켬 (휴대폰이 마이크 권한을 매번 다시 묻지 않도록)
+    var r = rec || new SR();
+    if (!rec) {
+      r.lang = "ko-KR";
+      r.continuous = true;
+      r.interimResults = true;
+      r.maxAlternatives = 1;
+      r.onresult = function (e) {
+        // 전체 결과를 매번 다시 모아서 중복 누적을 막음
+        var fin = [], interim = "";
+        for (var i = 0; i < e.results.length; i++) {
+          var t = (e.results[i][0] && e.results[i][0].transcript || "").trim();
+          if (!t) continue;
+          if (e.results[i].isFinal) fin.push(t); else interim += (interim ? " " : "") + t;
+        }
+        sessionGotResult = true;
+        sessionText = joinText(fin.join("\n"), interim);
+        syncContent();
+        renderRecMeta();
+      };
+      r.onerror = function (e) {
+        if (e.error === "not-allowed" || e.error === "service-not-allowed" || e.error === "audio-capture") {
+          wantRec = false;
+          switchToManual(e.error === "audio-capture"
+            ? "마이크를 찾을 수 없어요. 진행한 내용을 직접 적어 주세요."
+            : (isStandalone ? STANDALONE_MSG : "마이크 사용이 허용되지 않았어요. 휴대폰 설정에서 브라우저의 마이크 권한을 허용하거나, 진행한 내용을 직접 적어 주세요."));
+        }
+        // no-speech, network, aborted 는 onend 에서 다시 시작
+      };
+      r.onend = function () {
+        committed = joinText(committed, sessionText);
+        sessionText = "";
+        syncContent();
+        if (wantRec) {
+          // 결과 없이 1.5초 안에 끊기는 일이 3번 연속이면 반복을 멈춤 (화면 멈춤 방지)
+          if (!sessionGotResult && Date.now() - sessionAt < 1500) quickFails++; else quickFails = 0;
+          if (quickFails >= 3) {
+            wantRec = false; rec = null; recElapsed = elapsed();
+            switchToManual(isStandalone ? STANDALONE_MSG : "음성 인식이 계속 끊겨요. 잠시 후 다시 시도하거나 진행한 내용을 직접 적어 주세요.");
+            return;
+          }
+          setTimeout(function () {
+            if (!wantRec) return;
+            try { sessionAt = Date.now(); sessionGotResult = false; r.start(); } catch (err) {}
+          }, 300 * (quickFails + 1));
+        } else {
+          rec = null;
+          var w = stopWaiters; stopWaiters = [];
+          w.forEach(function (fn) { fn(); });
+        }
+      };
+    }
+    sessionAt = Date.now(); sessionGotResult = false;
     r.start();
     return r;
   }
+  var STANDALONE_MSG = "홈 화면 아이콘으로 열면 음성 기록이 멈출 수 있어요. 브라우저(Safari·Chrome)에서 주소를 열어 사용하거나, 진행한 내용을 직접 적어 주세요.";
 
   function startRec() {
     if (!SR) { switchToManual(); return; }
     wantRec = true;
+    quickFails = 0;
     recStartedAt = Date.now();
-    try { rec = startSession(); } catch (err) { wantRec = false; switchToManual(); return; }
+    try { rec = startSession(); } catch (err) { wantRec = false; rec = null; switchToManual(); return; }
     try { if (navigator.wakeLock) navigator.wakeLock.request("screen").then(function (l) { wakeLock = l; }).catch(function () {}); } catch (e) {}
     clearInterval(recTimer);
     recTimer = setInterval(renderRecMeta, 1000);
